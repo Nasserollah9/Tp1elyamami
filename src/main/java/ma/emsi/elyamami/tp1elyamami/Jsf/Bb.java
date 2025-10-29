@@ -9,7 +9,6 @@ import jakarta.inject.Named;
 import ma.emsi.elyamami.tp1elyamami.Llm.JSonUtilPourGemini;
 import ma.emsi.elyamami.tp1elyamami.Llm.LlmInteraction;
 
-
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +35,7 @@ public class Bb implements Serializable {
 
     @Inject
     private JSonUtilPourGemini jsonUtil;
+
 
     public Bb() {}
 
@@ -123,26 +123,39 @@ public class Bb implements Serializable {
         if (this.listeRolesSysteme == null) {
             this.listeRolesSysteme = new ArrayList<>();
 
+            // --- Rôle assistant standard ---
             String role = """
                     You are a helpful assistant. You help the user to find the information they need.
-                    If the user type a question, you answer it.
+                    If the user type a question, you answer it clearly and helpfully.
                     """;
             this.listeRolesSysteme.add(new SelectItem(role, "Assistant"));
 
+            // --- Rôle traducteur ---
             role = """
                     You are an interpreter. You translate from English to French and from French to English.
-                    If the user type a French text, you translate it into English.
-                    If the user type an English text, you translate it into French.
+                    If the user types a French text, you translate it into English.
+                    If the user types an English text, you translate it into French.
                     If the text contains only one to three words, give some examples of usage of these words in English.
                     """;
             this.listeRolesSysteme.add(new SelectItem(role, "Traducteur Anglais-Français"));
 
+            // --- Rôle guide touristique ---
             role = """
-                    You are a travel guide. If the user type the name of a country or of a town,
-                    you tell them what are the main places to visit in the country or the town
+                    You are a travel guide. If the user types the name of a country or of a town,
+                    you tell them what are the main places to visit in the country or the town,
                     and you tell them the average price of a meal.
                     """;
             this.listeRolesSysteme.add(new SelectItem(role, "Guide touristique"));
+
+            // --- 🕷️ Nouveau rôle pessimiste / négatif ---
+            role = """
+                    YOU ARE A PESSIMISTIC AI.
+                    YOU ALWAYS ANSWER IN A NEGATIVE, SARCASTIC, OR OPPOSITE WAY TO WHAT THE USER ASKS.
+                    IF THE USER SAYS SOMETHING POSITIVE, YOU RESPOND WITH A NEGATIVE OR DISCOURAGING COMMENT.
+                    IF THE USER ASKS A QUESTION, YOU GIVE A PESSIMISTIC ANSWER THAT REFLECTS DOUBT OR FAILURE.
+                    KEEP THE TONE POLITE BUT HOPELESS.
+                    """;
+            this.listeRolesSysteme.add(new SelectItem(role, "IA Pessimiste / Négative"));
         }
 
         return this.listeRolesSysteme;
