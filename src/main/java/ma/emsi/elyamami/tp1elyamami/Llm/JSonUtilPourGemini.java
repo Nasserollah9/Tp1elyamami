@@ -114,35 +114,26 @@ public class JSonUtilPourGemini implements Serializable {
      * @return le texte du document JSON de la requête.
      */
     private String creerRequeteJson(String systemRole, String question) {
-        // Création de l'objet "system_instruction"
-        JsonArray systemInstructionParts = Json.createArrayBuilder()
-                .add(Json.createObjectBuilder()
-                        .add("text", systemRole))
-                .build();
-        JsonObject systemInstruction = Json.createObjectBuilder()
-                .add("parts", systemInstructionParts)
-                .build();
-        // Création de l'objet "contents"
-        JsonArray userContentParts = Json.createArrayBuilder()
-                .add(Json.createObjectBuilder()
-                        .add("text", question))
-                .build();
-        JsonObject userContent = Json.createObjectBuilder()
-                .add("role", "user")
-                .add("parts", userContentParts)
-                .build();
-        JsonArray contents = Json.createArrayBuilder()
-                .add(userContent)
-                .build();
-        // Création de l'objet racine
-        JsonObject rootJson = Json.createObjectBuilder()
-                .add("system_instruction", systemInstruction)
-                .add("contents", contents)
-                .build();
-        this.requeteJson = rootJson;
+        if (systemRole == null || systemRole.isEmpty()) {
+            systemRole = "You are a helpful assistant.";
+        }
 
+        JsonObject rootJson = Json.createObjectBuilder()
+                .add("system_instruction", Json.createObjectBuilder()
+                        .add("parts", Json.createArrayBuilder()
+                                .add(Json.createObjectBuilder().add("text", systemRole))))
+                .add("contents", Json.createArrayBuilder()
+                        .add(Json.createObjectBuilder()
+                                .add("role", "user")
+                                .add("parts", Json.createArrayBuilder()
+                                        .add(Json.createObjectBuilder().add("text", question)))))
+                .build();
+
+        this.requeteJson = rootJson;
         return rootJson.toString();
     }
+
+
     /**
      * Modifie le JSON de la requete pour ajouter le JsonObject lié à la nouvelle question dans messagesJson.
      * Il faut ajouter au tableau JSON.

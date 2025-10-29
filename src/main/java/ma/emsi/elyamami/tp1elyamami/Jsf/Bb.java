@@ -84,9 +84,11 @@ public class Bb implements Serializable {
         // 🔽 Appel réel au LLM via JsonUtil
         try {
             LlmInteraction interaction = jsonUtil.envoyerRequete(question);
-            this.reponse += "Réponse : " + interaction.questionExtraite() + "\n";
+            // On stocke uniquement le texte de la réponse
+            this.reponse += "Réponse : " + interaction.reponseExtraite() + "\n";
+            // Pour debug, si besoin
             this.texteRequeteJson = interaction.questionJson();
-            this.texteReponseJson = interaction.texteRequeteJson();
+            this.texteReponseJson = interaction.texteReponseJson();
         } catch (Exception e) {
             FacesMessage message =
                     new FacesMessage(FacesMessage.SEVERITY_ERROR,
