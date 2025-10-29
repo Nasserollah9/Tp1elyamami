@@ -6,115 +6,65 @@ import jakarta.faces.model.SelectItem;
 import jakarta.faces.view.ViewScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+import ma.emsi.elyamami.tp1elyamami.Llm.JSonUtilPourGemini;
+import ma.emsi.elyamami.tp1elyamami.Llm.LlmInteraction;
+
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-
-
-/**
- * Backing bean pour la page JSF index.xhtml.
- * Portée view pour conserver l'état de la conversation qui dure pendant plusieurs requêtes HTTP.
- * La portée view nécessite l'implémentation de Serializable (le backing bean peut être mis en mémoire secondaire).
- */
 @Named
 @ViewScoped
 public class Bb implements Serializable {
 
-    /**
-     * Rôle "système" que l'on attribuera plus tard à un LLM.
-     * Valeur par défaut que l'utilisateur peut modifier.
-     * Possible d'écrire un nouveau rôle dans la liste déroulante.
-     */
     private String roleSysteme;
-private boolean Debug;
-    /**
-     * Quand le rôle est choisi par l'utilisateur dans la liste déroulante,
-     * il n'est plus possible de le modifier (voir code de la page JSF), sauf si on veut un nouveau chat.
-     */
+    private boolean Debug;
     private boolean roleSystemeChangeable = true;
-
-    /**
-     * Liste de tous les rôles de l'API prédéfinis.
-     */
     private List<SelectItem> listeRolesSysteme;
 
-    /**
-     * Dernière question posée par l'utilisateur.
-     */
     private String question;
-    /**
-     * Dernière réponse de l'API OpenAI.
-     */
     private String reponse;
-    /**
-     * La conversation depuis le début.
-     */
     private StringBuilder conversation = new StringBuilder();
 
-    /**
-     * Contexte JSF. Utilisé pour qu'un message d'erreur s'affiche dans le formulaire.
-     */
+    private String texteRequeteJson;
+    private String texteReponseJson;
+
     @Inject
     private FacesContext facesContext;
 
-    /**
-     * Obligatoire pour un bean CDI (classe gérée par CDI), s'il y a un autre constructeur.
-     */
-    public Bb() {
-    }
+    @Inject
+    private JSonUtilPourGemini jsonUtil;
 
-    public String getRoleSysteme() {
-        return roleSysteme;
-    }
+    public Bb() {}
 
-    public void setRoleSysteme(String roleSysteme) {
-        this.roleSysteme = roleSysteme;
-    }
+    // ========================= GETTERS / SETTERS =========================
 
-    public boolean isRoleSystemeChangeable() {
-        return roleSystemeChangeable;
-    }
+    public String getRoleSysteme() { return roleSysteme; }
+    public void setRoleSysteme(String roleSysteme) { this.roleSysteme = roleSysteme; }
 
-    public String getQuestion() {
-        return question;
-    }
+    public boolean isRoleSystemeChangeable() { return roleSystemeChangeable; }
 
-    public void setQuestion(String question) {
-        this.question = question;
-    }
+    public String getQuestion() { return question; }
+    public void setQuestion(String question) { this.question = question; }
 
-    public String getReponse() {
-        return reponse;
-    }
+    public String getReponse() { return reponse; }
+    public void setReponse(String reponse) { this.reponse = reponse; }
 
-    /**
-     * setter indispensable pour le textarea.
-     *
-     * @param reponse la réponse à la question.
-     */
-    public void setReponse(String reponse) {
-        this.reponse = reponse;
-    }
+    public String getConversation() { return conversation.toString(); }
+    public void setConversation(String conversation) { this.conversation = new StringBuilder(conversation); }
 
-    public String getConversation() {
-        return conversation.toString();
-    }
+    public boolean isDebug() { return Debug; }
+    public void setDebug(boolean debug) { Debug = debug; }
 
-    public void setConversation(String conversation) {
-        this.conversation = new StringBuilder(conversation);
-    }
+    public String getTexteRequeteJson() { return texteRequeteJson; }
+    public String getTexteReponseJson() { return texteReponseJson; }
 
-    /**
-     * Envoie la question au serveur.
-     * En attendant de l'envoyer à un LLM, le serveur fait un traitement quelconque, juste pour tester :
-     * Le traitement consiste à copier la question en minuscules et à l'entourer avec "||". Le rôle système
-     * est ajouté au début de la première réponse.
-     *
-     * @return null pour rester sur la même page.
-     */
+    public void toggleDebug() { this.setDebug(!isDebug()); }
+
+    // ========================= LOGIQUE D'ENVOI =========================
+
     public String envoyer() {
         if (question == null || question.isBlank()) {
             FacesMessage message = new FacesMessage(
@@ -126,52 +76,55 @@ private boolean Debug;
             return null;
         }
 
-
-        this.reponse = "\n=== Nouvelle question ===\n";
-
         if (this.conversation.isEmpty()) {
-            this.reponse += "Rôle système : " + roleSysteme.toUpperCase(Locale.FRENCH) + "\n";
+            this.reponse = "Rôle système : " + roleSysteme.toUpperCase(Locale.FRENCH) + "\n";
             this.roleSystemeChangeable = false;
         }
 
-        this.reponse += "Question : " + question + "\n";
-        this.reponse += "Réponse : || " + question.toLowerCase(Locale.FRENCH) + " ||\n";
-        this.reponse += "==========================\n";
+        // 🔽 Appel réel au LLM via JsonUtil
+        try {
+            LlmInteraction interaction = jsonUtil.envoyerRequete(question);
+            this.reponse += "Réponse : " + interaction.questionExtraite() + "\n";
+            this.texteRequeteJson = interaction.questionJson();
+            this.texteReponseJson = interaction.texteRequeteJson();
+        } catch (Exception e) {
+            FacesMessage message =
+                    new FacesMessage(FacesMessage.SEVERITY_ERROR,
+                            "Problème de connexion avec l'API du LLM",
+                            "Problème de connexion avec l'API du LLM : " + e.getMessage());
+            facesContext.addMessage(null, message);
+            return null;
+        }
 
         afficherConversation();
         return null;
     }
 
-    /**
-     * Pour un nouveau chat.
-     * Termine la portée view en retournant "index" (la page index.xhtml sera affichée après le traitement
-     * effectué pour construire la réponse) et pas null. null aurait indiqué de rester dans la même page (index.xhtml)
-     * sans changer de vue.
-     * Le fait de changer de vue va faire supprimer l'instance en cours du backing bean par CDI et donc on reprend
-     * tout comme au début puisqu'une nouvelle instance du backing va être utilisée par la page index.xhtml.
-     * @return "index"
-     */
+    // ========================= NOUVEAU CHAT =========================
+
     public String nouveauChat() {
         return "index";
     }
 
-    /**
-     * Pour afficher la conversation dans le textArea de la page JSF.
-     */
+    // ========================= AFFICHAGE =========================
+
     private void afficherConversation() {
-        this.conversation.append("== User:\n").append(question).append("\n== Serveur:\n").append(reponse).append("\n");
+        this.conversation
+                .append("== User:\n").append(question)
+                .append("\n== Serveur:\n").append(reponse)
+                .append("\n==========================\n");
     }
+
+    // ========================= ROLES SYSTÈME =========================
 
     public List<SelectItem> getRolesSysteme() {
         if (this.listeRolesSysteme == null) {
-            // Génère les rôles de l'API prédéfinis
             this.listeRolesSysteme = new ArrayList<>();
-            // Vous pouvez évidemment écrire ces rôles dans la langue que vous voulez.
+
             String role = """
                     You are a helpful assistant. You help the user to find the information they need.
                     If the user type a question, you answer it.
                     """;
-            // 1er argument : la valeur du rôle, 2ème argument : le libellé du rôle
             this.listeRolesSysteme.add(new SelectItem(role, "Assistant"));
 
             role = """
@@ -183,26 +136,13 @@ private boolean Debug;
             this.listeRolesSysteme.add(new SelectItem(role, "Traducteur Anglais-Français"));
 
             role = """
-                    Your are a travel guide. If the user type the name of a country or of a town,
+                    You are a travel guide. If the user type the name of a country or of a town,
                     you tell them what are the main places to visit in the country or the town
-                    are you tell them the average price of a meal.
+                    and you tell them the average price of a meal.
                     """;
             this.listeRolesSysteme.add(new SelectItem(role, "Guide touristique"));
         }
 
         return this.listeRolesSysteme;
     }
-    public void toggleDebug() {
-        this.setDebug(!isDebug());
-    }
-
-    public boolean isDebug() {
-        return Debug;
-    }
-
-    public void setDebug(boolean debug) {
-        Debug = debug;
-    }
 }
-
-
