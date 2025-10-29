@@ -1,5 +1,6 @@
 package ma.emsi.elyamami.tp1elyamami.Llm;
 
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.json.*;
 import jakarta.json.stream.JsonGenerator;
@@ -12,7 +13,7 @@ import java.io.StringReader;
 import java.io.StringWriter;
 import java.util.HashMap;
 import java.util.Map;
-
+@ApplicationScoped
 public class JSonUtilPourGemini implements Serializable {
     private String systemRole; // = "helpful assistant";
     /**
