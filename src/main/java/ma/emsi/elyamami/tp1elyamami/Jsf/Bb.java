@@ -7,6 +7,7 @@ import jakarta.faces.view.ViewScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import ma.emsi.elyamami.tp1elyamami.Llm.JSonUtilPourGemini;
+
 import ma.emsi.elyamami.tp1elyamami.Llm.LlmInteraction;
 
 import java.io.Serializable;
@@ -23,7 +24,11 @@ public class Bb implements Serializable {
     private boolean roleSystemeChangeable = true;
     private List<SelectItem> listeRolesSysteme;
 
+    // Flag to indicate that the system role has been defined and displayed once
+    private boolean roleSystemeSet = false;
+
     private String question;
+    // Holds the latest text response from the model
     private String reponse;
     private StringBuilder conversation = new StringBuilder();
 
@@ -63,91 +68,121 @@ public class Bb implements Serializable {
 
     public void toggleDebug() { this.setDebug(!isDebug()); }
 
-    // ========================= LOGIQUE D'ENVOI =========================
+    // ========================= APPLICATION LOGIC =========================
 
     public String envoyer() {
         if (question == null || question.isBlank()) {
             FacesMessage message = new FacesMessage(
                     FacesMessage.SEVERITY_ERROR,
-                    "Texte question vide",
-                    "Il manque le texte de la question"
+                    "Empty question text",
+                    "The question text is missing"
             );
             facesContext.addMessage(null, message);
             return null;
         }
 
-        if (this.conversation.isEmpty()) {
-            this.reponse = "Rôle système : " + roleSysteme.toUpperCase(Locale.FRENCH) + "\n";
+        // 1. Initialize the system role once
+        if (!roleSystemeSet) {
+            jsonUtil.setSystemRole(roleSysteme);
+            this.roleSystemeSet = true;
             this.roleSystemeChangeable = false;
         }
 
-        // 🔽 Appel réel au LLM via JsonUtil
+        // 2. Actual LLM call
         try {
             LlmInteraction interaction = jsonUtil.envoyerRequete(question);
-            // On stocke uniquement le texte de la réponse
-            this.reponse += "Réponse : " + interaction.reponseExtraite() + "\n";
-            // Pour debug, si besoin
+            // Store ONLY the raw response text
+            this.reponse = interaction.reponseExtraite();
+
+            // For debugging
             this.texteRequeteJson = interaction.questionJson();
             this.texteReponseJson = interaction.texteReponseJson();
         } catch (Exception e) {
             FacesMessage message =
                     new FacesMessage(FacesMessage.SEVERITY_ERROR,
-                            "Problème de connexion avec l'API du LLM",
-                            "Problème de connexion avec l'API du LLM : " + e.getMessage());
+                            "Problem connecting with the LLM API",
+                            "Problem connecting with the LLM API: " + e.getMessage());
             facesContext.addMessage(null, message);
             return null;
         }
 
+        // 3. Display and history update
         afficherConversation();
         return null;
     }
 
-    // ========================= NOUVEAU CHAT =========================
+    // ========================= NEW CHAT / RESET STATE (CORRECTION) =========================
 
     public String nouveauChat() {
-        return "index";
+        // CORRECTION: Reset explicit de l'état du bean pour garantir l'effacement
+        this.conversation = new StringBuilder();
+        this.reponse = null;
+        this.question = null;
+        this.roleSystemeSet = false;
+        this.roleSystemeChangeable = true;
+        this.texteRequeteJson = null;
+        this.texteReponseJson = null;
+
+        // Note: L'instance de jsonUtil est ApplicationScoped.
+        // Pour un reset complet de la conversation, jsonUtil.resetHistory() est nécessaire,
+        // si cette méthode existe et met requeteJson à null.
+
+        // Returning null allows an AJAX update to clear the conversation display on the same view.
+        return null;
     }
 
-    // ========================= AFFICHAGE =========================
+    // ========================= DISPLAY LOGIC =========================
 
     private void afficherConversation() {
+        // DISPLAY the System Role only once at the very beginning
+        if (this.conversation.isEmpty() && this.roleSystemeSet) {
+            this.conversation
+                    .append("--- Applied System Role ---\n")
+                    .append(this.roleSysteme)
+                    .append("\n-----------------------------\n");
+        }
+
+        // DISPLAY the conversation exchange
         this.conversation
                 .append("== User:\n").append(question)
                 .append("\n== Serveur:\n").append(reponse)
                 .append("\n==========================\n");
+
+        // Clear question and response after adding to history
+
     }
 
-    // ========================= ROLES SYSTÈME =========================
+    // ========================= SYSTEM ROLES DEFINITION =========================
 
     public List<SelectItem> getRolesSysteme() {
         if (this.listeRolesSysteme == null) {
             this.listeRolesSysteme = new ArrayList<>();
 
-            // --- Rôle assistant standard ---
+            // --- Standard Assistant Role ---
             String role = """
                     You are a helpful assistant. You help the user to find the information they need.
                     If the user type a question, you answer it clearly and helpfully.
                     """;
             this.listeRolesSysteme.add(new SelectItem(role, "Assistant"));
 
-            // --- Rôle traducteur ---
+            // --- Translator Role ---
             role = """
                     You are an interpreter. You translate from English to French and from French to English.
                     If the user types a French text, you translate it into English.
                     If the user types an English text, you translate it into French.
                     If the text contains only one to three words, give some examples of usage of these words in English.
                     """;
-            this.listeRolesSysteme.add(new SelectItem(role, "Traducteur Anglais-Français"));
+            this.listeRolesSysteme.add(new SelectItem(role, "English-French Translator"));
 
-            // --- Rôle guide touristique ---
+            // --- Tour Guide Role ---
             role = """
                     You are a travel guide. If the user types the name of a country or of a town,
                     you tell them what are the main places to visit in the country or the town,
                     and you tell them the average price of a meal.
                     """;
-            this.listeRolesSysteme.add(new SelectItem(role, "Guide touristique"));
+            this.listeRolesSysteme.add(new SelectItem(role, "Tour Guide"));
 
-            // --- 🕷️ Nouveau rôle pessimiste / négatif ---
+            // --- 🕷️ Pessimistic/Negative Role ---
             role = """
                     YOU ARE A PESSIMISTIC AI.
                     YOU ALWAYS ANSWER IN A NEGATIVE, SARCASTIC, OR OPPOSITE WAY TO WHAT THE USER ASKS.
@@ -155,7 +190,7 @@ public class Bb implements Serializable {
                     IF THE USER ASKS A QUESTION, YOU GIVE A PESSIMISTIC ANSWER THAT REFLECTS DOUBT OR FAILURE.
                     KEEP THE TONE POLITE BUT HOPELESS.
                     """;
-            this.listeRolesSysteme.add(new SelectItem(role, "IA Pessimiste / Négative"));
+            this.listeRolesSysteme.add(new SelectItem(role, "Pessimistic / Negative AI"));
         }
 
         return this.listeRolesSysteme;

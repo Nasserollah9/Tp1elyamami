@@ -15,15 +15,15 @@ import java.util.HashMap;
 import java.util.Map;
 @ApplicationScoped
 public class JSonUtilPourGemini implements Serializable {
-    private String systemRole; // = "helpful assistant";
+    private String systemRole;
     /**
-     * Pour ajouter une nouvelle valeur à la fin du tableau JSON "messages" dans le document JSON de la requête.
-     * Le "-" final indique que la valeur sera ajoutée à la fin du tableau.
+     * Le pointer cible toujours l'ajout d'un nouvel élément à la fin du tableau "contents".
      */
     private final JsonPointer pointer = Json.createPointer(("/contents/-"));
 
     /**
-     * Requête JSON, à partir du prompt de l'utilisateur.
+     * Requête JSON persistante : contient UNIQUEMENT l'objet racine avec le tableau "contents" (l'historique).
+     * La structure "system_instruction" n'est plus stockée ici.
      */
     private JsonObject requeteJson;
     private String texteRequeteJson;
@@ -31,58 +31,38 @@ public class JSonUtilPourGemini implements Serializable {
     public void setSystemRole(String systemRole) {
         this.systemRole = systemRole;
     }
-    /**
-     * Pour envoyer une requête à l'API de Gemini.
-     */
+
     @Inject
     private LlmClientPourGemini geminiClient;
 
     /**
      * Envoi une requête à l'API de Gemini.
-     * Format du document JSON envoyé dans la requête vers l'API :
-     * {
-     *     "contents": [
-     *         {
-     *             "role": "user",
-     *             "parts": [
-     *                 {
-     *                     "text": "Capitale de la France ?"
-     *                 }
-     *             ]
-     *         },
-     *         {
-     *             "role": "model",
-     *             "parts": [
-     *                 {
-     *                     "text": "Paris est la capitale de la France."
-     *                 }
-     *             ]
-     *         },
-     *         ...
-     *     ]
-     * }
-     * * @param question question posée par l'utilisateur
      *
-     * @return la réponse de l'API, sous la forme d'un texte simple (pas JSON).
+     * @param question question posée par l'utilisateur
+     * @return la réponse de l'API.
      * @throws RequeteException exception lancée dans le cas où la requête a été rejetée par l'API.
      */
     public LlmInteraction envoyerRequete(String question) throws RequeteException {
-        String requestBody;
+        // 1. Mise à jour de l'historique (this.requeteJson contient désormais UNIQUEMENT le tableau "contents")
         if (this.requeteJson == null) {
-            // Si c'est la première question, crée la requête JSON avec le rôle système.
-            requestBody = creerRequeteJson(this.systemRole, question);
+            // Premier tour : requeteJson est initialisé avec le premier message utilisateur.
+            this.requeteJson = creerRequeteJson(question);
         } else {
-            // Ajout de la question.
-            // Ce qui sera envoyé dans le corps de la requête POST.
-            // Un message associé à la question doit être ajouté aux messages associés au début de la conversation.
-            requestBody = ajouteQuestionDansJsonRequete(question);
+            // Tours suivants : Ajout du nouveau message utilisateur à l'historique existant.
+            ajouteQuestionDansJsonRequete(question);
         }
+
+        // 2. Construction de la requête finale (system_instruction + contents)
+        String requestBody = buildFullRequestJson(this.systemRole, this.requeteJson);
+
         Entity<String> entity = Entity.entity(requestBody, MediaType.APPLICATION_JSON_TYPE);
+
         // Pour afficher la requête JSON dans la page JSF
-        this.texteRequeteJson = prettyPrinting(requeteJson);
-        // Envoi la requête par l'intermédiaire du client de l'API de Gemini.
+        this.texteRequeteJson = prettyPrinting(Json.createReader(new StringReader(requestBody)).readObject());
+
+        // 3. Envoi de la requête
         try (Response response = geminiClient.envoyerRequete(entity)) {
-            // Entité incluse dans la réponse (texte au format JSON qui englobe la réponse à la question)
+            // Entité incluse dans la réponse (texte au format JSON)
             String texteReponseJson = response.readEntity(String.class);
             if (response.getStatus() == 200) {
                 return new LlmInteraction(this.texteRequeteJson, texteReponseJson, extractReponse(texteReponseJson));
@@ -95,53 +75,47 @@ public class JSonUtilPourGemini implements Serializable {
     }
 
     /**
-     * Crée une requête JSON pour envoyer à l'API de Gemini.
-     * Il y a le rôle du système et la question de l'utilisateur.
-     * Format du document JSON envoyé dans la requête vers l'API :
-     * {
-     *    "system_instruction": {
-     *      "parts": [ {"text": "helpful assistant"} ]
-     *    },
-     *    "contents": [
-     *        { "role": "user",
-     *          "parts": [ { "text": "Capitale de la France ?" } ]
-     *        }
-     *    ]
-     * }
+     * Crée l'objet JSON initial, contenant UNIQUEMENT le premier message utilisateur dans 'contents'.
      *
-     * @param systemRole le rôle du système. Par exemple, "helpful assistant".
      * @param question question posée par l'utilisateur.
-     * @return le texte du document JSON de la requête.
+     * @return le JsonObject contenant le tableau 'contents' initial.
      */
-    private String creerRequeteJson(String systemRole, String question) {
-        if (systemRole == null || systemRole.isEmpty()) {
-            systemRole = "You are a helpful assistant.";
-        }
-
-        JsonObject rootJson = Json.createObjectBuilder()
-                .add("system_instruction", Json.createObjectBuilder()
-                        .add("parts", Json.createArrayBuilder()
-                                .add(Json.createObjectBuilder().add("text", systemRole))))
+    private JsonObject creerRequeteJson(String question) {
+        // Crée l'objet qui contiendra l'historique de la conversation (le tableau 'contents')
+        return Json.createObjectBuilder()
                 .add("contents", Json.createArrayBuilder()
                         .add(Json.createObjectBuilder()
                                 .add("role", "user")
                                 .add("parts", Json.createArrayBuilder()
                                         .add(Json.createObjectBuilder().add("text", question)))))
                 .build();
+    }
 
-        this.requeteJson = rootJson;
-        return rootJson.toString();
+    /**
+     * Helper pour construire l'objet JSON complet avant l'envoi.
+     * Ceci combine le rôle système statique avec l'historique de conversation dynamique.
+     */
+    private String buildFullRequestJson(String systemRole, JsonObject currentRequeteJson) {
+        if (systemRole == null || systemRole.isEmpty()) {
+            systemRole = "You are a helpful assistant.";
+        }
+
+        JsonObjectBuilder rootBuilder = Json.createObjectBuilder()
+                // Ajout de l'instruction système
+                .add("system_instruction", Json.createObjectBuilder()
+                        .add("parts", Json.createArrayBuilder()
+                                .add(Json.createObjectBuilder().add("text", systemRole))))
+                // Ajout de l'historique de conversation (le tableau "contents")
+                .add("contents", currentRequeteJson.getJsonArray("contents"));
+
+        return rootBuilder.build().toString();
     }
 
 
     /**
-     * Modifie le JSON de la requete pour ajouter le JsonObject lié à la nouvelle question dans messagesJson.
-     * Il faut ajouter au tableau JSON.
-     *
-     * @param nouvelleQuestion question posée par l'utilsateur.
-     * @return le texte du document JSON de la requête.
+     * Modifie le JSON de l'historique (this.requeteJson) pour ajouter la nouvelle question utilisateur.
      */
-    private String ajouteQuestionDansJsonRequete(String nouvelleQuestion) {
+    private void ajouteQuestionDansJsonRequete(String nouvelleQuestion) {
         // Crée le nouveau JsonObject qui correspond à la nouvelle question
         JsonObject nouveauMessageJson = Json.createObjectBuilder()
                 .add("text", nouvelleQuestion)
@@ -152,17 +126,13 @@ public class JSonUtilPourGemini implements Serializable {
                 .add("parts", Json.createArrayBuilder()
                         .add(nouveauMessageJson)
                         .build());
-        // Ajoute ce nouveau JsonObjet dans this.requeteJson
+        // Ajoute ce nouveau JsonObjet dans le tableau "contents" de this.requeteJson
         this.requeteJson = this.pointer.add(this.requeteJson, newPartBuilder.build());
-        // La requête sous la forme d'une String avec mise en forme (passage à la ligne et indentation).
-        this.texteRequeteJson = prettyPrinting(requeteJson);
-        return this.requeteJson.toString();
+        // Pas besoin de retourner this.requeteJson.toString() ici, il sera géré par buildFullRequestJson
     }
+
     /**
      * Retourne le texte formaté du document JSON pour un affichage plus agréable.
-     *
-     * @param jsonObject l'objet JSON dont on veut une forme formatée.
-     * @return la forme formatée
      */
     private String prettyPrinting(JsonObject jsonObject) {
         Map<String, Boolean> config = new HashMap<>();
@@ -174,11 +144,9 @@ public class JSonUtilPourGemini implements Serializable {
         }
         return stringWriter.toString();
     }
+
     /**
-     * Extrait la réponse de l'API et ajoute la réponse à this.jsonRequete pour garder la conversation dans
-     * la prochaine requête.
-     * @param json le document JSON de la réponse.
-     * @return juste la valeur de content qui contient la réponse à la question.
+     * Extrait la réponse de l'API et ajoute la réponse à l'historique (this.requeteJson) pour la prochaine requête.
      */
     private String extractReponse(String json) {
         try (JsonReader jsonReader = Json.createReader(new StringReader(json))) {
@@ -187,7 +155,8 @@ public class JSonUtilPourGemini implements Serializable {
                     .getJsonArray("candidates")
                     .getJsonObject(0)
                     .getJsonObject("content");
-            // Ajoute l'objet JSON de la réponse de l'API au JSON de la prochaine requête
+            // Ajoute l'objet JSON de la réponse de l'API au JSON de la prochaine requête (role: model)
+            // Cible l'ajout dans le tableau "contents" de l'historique
             this.requeteJson = this.pointer.add(this.requeteJson, messageReponse);
             // Extrait seulement le texte de la réponse
             return messageReponse.getJsonArray("parts").getJsonObject(0).getString("text");
